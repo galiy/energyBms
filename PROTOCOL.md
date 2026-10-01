@@ -766,3 +766,68 @@ ACK записи (0xA1): 7e 14 00 a1 00 00 00 80 e7 0d         (LENID=0, кад�
 
 **Вывод:** формат кадра, CRC-16/CCITT, сборка по длине, раскладка телеметрии
 (§5.1) и формат блока 169 Б (§8.4) подтверждены на живом устройстве.
+
+## Примечание: доступность TeleState (0x44)/Telemetry (0x42) на живом устройстве (2026-10-01)
+
+Проверено на устройстве (BlueZ/bleak через сервер .253): запросы `CID2=0x42` и
+`CID2=0x44` **не получают ответа** (таймаут) при `INFO` = `[0x00]`, `[0x01]`,
+`[0x02]`, `[00 00]` и пустом. Приложение/устройство отвечает только на
+`0x51` (BasicInfo), `0x61` (Battery), `0x62` (ParallelBattery), `0x47`
+(ReadBMSParams). Вывод: **блоки TeleState/Telemetry в прикладном диалекте
+недоступны**, поэтому активные защиты/предупреждения из `Ext_Bit` (§7) прочитать
+нельзя; доступна только телеметрия Battery (0x61) и пороги ReadBMSParams (0x47).
+
+Разметка `Ext_Bit` (byte/bit) подтверждена по XML приложения
+`16S_V20_ADDR_EN.xml` (`teleSignal`, совпадает с таблицей §7): байты 0..13.
+
+## XML приложения: разметка телесигналов
+
+`16S_V20_ADDR_EN.xml` (protocolConfig, `BMS-16S` v2.0) содержит:
+- `teleMeter_Group` — раскладка телеметрии Battery (ячейки/температуры/ток/…);
+- `teleSignal` — 126 сигналов `Ext_Bit` с `ByteIndex`/`BitIndex`/`Type`
+  (`Warn`/`Protect`/`Normal`) — та же карта, что в §7;
+- `int_para`/`bit_para` — параметры (пороги), соответствуют §8.
+
+Пороги из `int_para` также выгружены в `tools/params_table.py`.
+
+### 5.1.1. Точная раскладка ХВОСТА Battery из `parseBody_Battery` (APK, 2026-10-01)
+
+Разобрана функция `parseBody_Battery` (`BmsMsgUtil.dart`, addr `0x3f3a18`,
+размер `0x20f4`, blutter-дамп `/tmp/kilo/bms_out/.../BmsMsgUtil.dart`) и метод
+`toJson` (`0x3def6c`), задающий **порядок имён** полей модели `Bms_Recv_Model`.
+
+Порядок полей (из `toJson`, подтверждает §5.1):
+`dataflag, slaveNo, batterynum, voltagelist, tempnum, templist, envtemp,
+powertemp, chargecurrent, totalvoltage, leftcapacity, customerp, totalcapacity,
+soc, ratedcapacity, cycles, soh, portvoltage, reservelist1, batterywarnlist,
+tempwarnlist, envtempwarn, powertempwarn, chargecurrentwarn, customerwarnp,
+eventwarnlist, switchstate, balancestatelist, sysstate, brokenstatelist`.
+
+Как `parseBody_Battery` читает хвост (после `portvoltage`; смещения — от начала
+39-байтного хвоста, наблюдаемого в живом кадре, INFO=106 Б, телеметрия=67 Б):
+
+| Смещение | Байт | Как читается | Смысл (по порядку имён) |
+|---|---|---|---|
+| 0 | **16** (=`batterynum`) | цикл appends байт в отдельный список | первый warn-список (по ячейкам) |
+| 16 | **`tempnum−2`** (=4) | цикл appends байт | warn-список по температурам (без ambient/power) |
+| 20 | 1 | один байт | `envtempwarn` |
+| 21 | 1 | один байт | `powertempwarn` |
+| 22 | 1 | один байт | `chargecurrentwarn` |
+| 23 | 1 | пропуск/скаляр | `customerwarnp` |
+| 24 | 1 | `parseByte` | состояние (напр. `eventwarnlist`/`switchstate`) |
+| 25 | 1 | `parseByte` | состояние |
+| 26 | 1 | счётчик N | число блоков далее (в норме 3) |
+| 27… | N×? | цикл: из байта раскладываются 8 бит в массив из 16 | `eventwarnlist`/`balancestatelist`/`sysstate`/`brokenstatelist` |
+
+**Живой кадр (здоровая батарея):** хвост = `00`×25, затем `01 03 08`, затем `00`×11.
+То есть **warn-область хвоста (смещения 0…23) вся нулевая**, а ненулевые байты
+`01 03 08` (смещения 25…27) относятся к статусам (ключи/балансировка/режим), а не
+к авариям. Это и было причиной ложных Warn/Protect при ошибочном смещении.
+
+> ⚠️ Однозначное сопоставление первых двух списков с именами
+> `reservelist1` / `batterywarnlist` (оба по `batterynum`-подобному счётчику)
+> требует доп. проверки; практический вывод неизменен — warn-байты в начале хвоста,
+> статусы — во второй половине.
+
+**Практический вывод для декодера:** аварии Battery читать из warn-области
+(смещения 0…22), а не из `Ext_Bit` XML `teleSignal_Group`.
