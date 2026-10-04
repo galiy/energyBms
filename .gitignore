@@ -14,3 +14,15 @@ btlogs/
 # Python
 __pycache__/
 *.pyc
+
+# Локальные настройки соединения EnergyBMS Editor (могут содержать приватные адреса)
+energybms_editor.json
+energybms-editor/energybms_editor.json
+*.tmp
+
+# Сборка Python (PyInstaller)
+build/
+dist/
+*.spec
+.venv/
+venv/

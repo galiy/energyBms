@@ -3,7 +3,7 @@
 Технический дневник: как восстановлен протокол Enjie, какие инструменты и
 приёмы использовались, какие грабли встретились. Написан так, чтобы **другая
 сессия могла продолжить работу** без повторного «изобретения» методов.
-Результаты (сам протокол) вынесены в `PROTOCOL.md`.
+Результаты (сам протокол) вынесены в `protocol-BLE.md`.
 
 ## Содержание
 
@@ -19,7 +19,7 @@
 
 | Артефакт | Путь / доступ | Примечание |
 |---|---|---|
-| APK приложения | `./BMS_1.1.4.apk` (копия; ориг. `/home/sasha/Загрузки/`) | SHA-256 `584230df…273c21`, debug-сборка |
+| APK приложения | `./BMS_1.1.4.apk` (копия; ориг. `/home/<user>/Загрузки/`) | SHA-256 `584230df…273c21`, debug-сборка |
 | Распаковка apktool | `/tmp/kilo/bms_full`, `/tmp/kilo/bms` | **в `/tmp` — не переживёт перезагрузку** |
 | Даташит | `emu1101-24v-24100-1101-10e-08s-v1-0-en.pdf` | в репозитории |
 | Dart-AOT декомпиляция | `/tmp/kilo/bms_out` (blutter) | ключевой файл `asm/bms_flutter/common/ble/BmsMsgUtil.dart`; **`/tmp` — непостоянно** |
@@ -34,7 +34,7 @@
   `hciconfig reset/up`, `btmgmt power`, очистки сопряжений) — только пассивный
   скан и подключение к рекламирующимся устройствам.
 - Приватные данные — только в `.kilo/`; sudo-пароль — в связке ключей
-  (`secret-tool lookup service sudo username sasha`), не логировать.
+  (`secret-tool lookup service sudo username <user>`), не логировать.
 - Язык ответов — русский.
 - **Не редактировать `.kilo/agent-manager.json`**.
 
@@ -48,7 +48,7 @@ arm64, compressed-pointers, null-safety).
 ### Контекст реверс-инжиниринга
 
 - Описание устройства (сайт производителя): [EMU1101-V1.6 Smart BMS 100A/150A/200A 8S-16S LFP NCM](https://www.cnshenergy.com/products/emu1101-v16-smart-bms-100a-150a-200a-8s-16s-lfp-ncm/)
-- APK: `/home/sasha/Загрузки/BMS_1.1.4.apk`, распакован в `/tmp/kilo/bms_full` (apktool) и `/tmp/kilo/bms`.
+- APK: `/home/<user>/Загрузки/BMS_1.1.4.apk`, распакован в `/tmp/kilo/bms_full` (apktool) и `/tmp/kilo/bms`.
 - Декомпиляция: `blutter` (`/tmp/kilo/blutter`, репозиторий `worawit/blutter`), выводится в `/tmp/kilo/bms_out`.
 - Ключевой файл: `/tmp/kilo/bms_out/asm/bms_flutter/common/ble/BmsMsgUtil.dart`
   (классы `BmsMsgUtil`, `Bms_Msg_Model`). Дополнительно: `common/ble/ble_data.dart`.
@@ -58,8 +58,8 @@ arm64, compressed-pointers, null-safety).
 | Роль | UUID |
 |---|---|
 | сервис | `0000ff00-…` |
-| запись (write) | `0000ff01-…` |
-| уведомления (notify) | `0000ff02-…` |
+| запись (write) | `0000ff02-…` |
+| уведомления (notify) | `0000ff01-…` |
 | CCCD | `00002902-…` |
 
 ### HTTP-эндпоинты (из приложения)
@@ -167,7 +167,7 @@ BasicInfo:        7E 10 <addr> 46 51 00 00 <crcHi> <crcLo> 1A
 
 ### Уточнения по APK (сверка с ПО «Upper Computer», 2026-09-30)
 
-После получения протокола производителя (`PROTOCOL.md`) `BmsMsgUtil.dart`
+После получения протокола производителя (`protocol-BLE.md`) `BmsMsgUtil.dart`
 перечитан заново. Что уточнилось:
 
 - **`cmd1` захардкожен** в `getCmd_*`: `BasicInfo 0x51`, `Battery 0x61`,
@@ -187,7 +187,7 @@ BasicInfo:        7E 10 <addr> 46 51 00 00 <crcHi> <crcLo> 1A
   soc, ratedcapacity, cycles, soh, portvoltage, reservelist1, batterywarnlist,
   tempwarnlist, envtempwarn, powertempwarn, chargecurrentwarn, customerwarnp,
   eventwarnlist, switchstate, balancestatelist, sysstate, brokenstatelist`
-  (полная таблица — `PROTOCOL.md` §5.1). «Заголовок» `00 00 10` в живом кадре —
+  (полная таблица — `protocol-BLE.md` §5.1). «Заголовок» `00 00 10` в живом кадре —
   это `dataflag=0`, `slaveNo=0`, `batterynum=16`.
 - **Хвост кадра:** в asm `getSendMsg` (0x3d0648) фигурирует константа `0x1A`,
   но фактический кадр на проводе — `7e1000465100003a7f0d` (заканчивается
@@ -196,9 +196,9 @@ BasicInfo:        7E 10 <addr> 46 51 00 00 <crcHi> <crcLo> 1A
 - CRC-16/CCITT по `frame[1:-3]` перепроверен на живых кадрах: `3a7f/f7c1/e716`.
 - **`customerp` в `Bms_Recv_Model` — 1 байт (u8)**, а не u16: только при таком
   выравнивании в живом кадре `0x61` сходятся `totalcapacity`=314 А·ч, `soc`≈33 %,
-  `soh`=100 %, `portvoltage`≈52 В (см. `PROTOCOL.md` §5.1).
-- Команды `0x42, 0x44, 0x4F, 0x90, 0x4D, 0xA2, 0xA4` прошивкой **не поддержаны**
-  (ответа нет); рабочий набор чтения — `0x51, 0x61, 0x62, 0x47`.
+  `soh`=100 %, `portvoltage`≈52 В (см. `protocol-BLE.md` §5.1).
+- В BLE-диалекте используются `0x51, 0x61, 0x62, 0x47`; команды
+  `0x42, 0x44, 0x4F, 0x90, 0x4D, 0xA2, 0xA4` доступны по RS485 (`protocol-485.md`).
 - `ParallelBattery (0x62)` возвращает 40 Б (при одиночном устройстве — нули).
 - **Серийного номера в чтении нет:** рекламный пакет пуст (нет manufacturer/service data,
   только `ff00`), сервис Device Information (`180A`/`2A25`) не выставляется, `GetSN (0xA2)` и
@@ -211,7 +211,7 @@ BasicInfo:        7E 10 <addr> 46 51 00 00 <crcHi> <crcLo> 1A
 ### 2.1. Хвост `parseBody_Battery` (0x61) — точная раскладка (2026-10-01)
 
 - Функция `parseBody_Battery` (`BmsMsgUtil.dart`, `0x3f3a18`, size `0x20f4`);
-  порядок имён полей — из `toJson` (`0x3def6c`), см. `PROTOCOL.md` §5.1.1.
+  порядок имён полей — из `toJson` (`0x3def6c`), см. `protocol-BLE.md` §5.1.1.
 - После `portvoltage` идёт 39-байтный хвост: список `batterynum`(=16) байт, затем
   список `tempnum−2`(=4) байт, затем 3 одиночных warn-байта, скаляры и блоки
   состояний (см. таблицу в PROTOCOL §5.1.1).
@@ -329,30 +329,11 @@ ReadBMSParams) — выглядит как **статус/ACK**, а **не** д�
 То есть tail `0x1A` установлен только на отправку, а на приёме ожидается
 `0x0D` (либо это раздельные протокольные константы).
 
-### 6. Характер проблемы
+### 6. Решение (заменяет разделы 5–7)
 
-- Транспорт BLE и сервис `0000ff00` работают, запись в `ff02` проходит.
-- Устройство отвечает служебным `0101`, но **полного ответного кадра
-  `7E 10 … 0D` с данными пока не получено**. Причины (наиболее вероятные):
-
-  1. **Поле `addr`** в кадре. В документе это «адрес/индекс устройства»
-     (аргумент команды). В коде `field_1b` = addr; значение, которое нужно
-     слать для BP00 — не установлено (проверяли `0`, не помогло).
-  2. Возможно, база отвечает полным кадром только на `ff03` **после накопления**
-     (как `msgQueue` в приложении), и `0101` — первый фрагмент/ACK,
-     за которым полный кадр не успевает прийти из-за слабого RSSI/обрыва.
-  3. Запрошенная команда при неверном `addr` игнорируется и возвращается
-     только ACK.
-
-### 7. Как действовать дальше (без трогания адаптера)
-
-- Писать команду в **`ff02`**, подписка на **`ff03`**.
-- Дождаться появления `BP00` (пассивное сканирование), сразу подключаться.
-- **Накапливать** входящие байты в буфер (как `msgQueue`) и искать полный
-  кадр `7E … 0D` в потоке.
-- Проверить варианты поля `addr` (индекс модуля; для одной ячейки — вероятно
-  `1`, либо значение из DIP-переключателя).
-- Кандидаты экспериментальных адресов: `1`, `0x10`, `0x28`, `0x9C`.
+Полный ответный кадр получен. Рабочие параметры: канал ответов — notify **`ff01`**
+(write `ff02`), хвост `0x0D`, CRC-16/CCITT по `frame[1:-3]`, `addr` в ответе `0x14`.
+Детали и живой трафик — в §10.
 
 ### 10. ПОДТВЕРЖДЕНО HCI-snoop-дампом с телефона (2026-09-30)
 
@@ -373,9 +354,8 @@ ReadBMSParams) — выглядит как **статус/ACK**, а **не** д�
 notify `ff01` (handle `0x0011`)**. Это совпадает с исходником
 (`writeCharacteristicUUID=ff02`, `notifyCharacteristicUUID=ff01`).
 
-> ⚠️ В разделах 2 и 7 ошибочно указано слушать `ff03` — это было следствием
-> неверно выбранного канала в пробных bleak-скриптах. Правильный канал
-> ответов — **`ff01`**. `ff03`/`ff04` приложением не используются.
+> ⚠️ В разделе 2 ошибочно указано слушать `ff03`. Правильный канал ответов —
+> **`ff01`**. `ff03`/`ff04` приложением не используются.
 
 #### 10.2. Реальный формат кадра (подтверждён обе стороны)
 
@@ -477,7 +457,7 @@ Payload у двух записей почти идентичен; различа
 | Кадр `7E 10 addr 46 cmd1 len crc 1A` | ⚠️ структура верна, но **tail = `0x0D`**, а не `0x1A` |
 | CRC-16/CCITT `0x1021`, init 0, big-endian | ⚠️ полином/порядок верны, но **CRC считается БЕЗ ведущего `0x7E`** |
 | Команды `0x51/0x61/0x62/0x47/0x63` | ✅ подтверждены; плюс обнаружена команда **`0xA1`** (запись) |
-| Поле `addr` = 0 в запросе | ✅ так и есть; в ответе байт 2 = `0x00` (эхо ADR). **Байт 1 ответа = `0x14`, а не ADR**, и после `CID2` идёт байт `RTN` (`00`) — уточнено живым захватом (см. §11.1 и `PROTOCOL.md` §3.1) |
+| Поле `addr` = 0 в запросе | ✅ так и есть; в ответе байт 2 = `0x00` (эхо ADR). **Байт 1 ответа = `0x14`, а не ADR**, и после `CID2` идёт байт `RTN` (`00`) — уточнено живым захватом (см. §11.1 и `protocol-BLE.md` §3.1) |
 
 ### 11. Углублённый разбор кадров (декодирование payload)
 
@@ -623,7 +603,7 @@ JBD/JK/Daly; это **собственный формат Enjie**. Его стр
 официальное ПО Enjie «Upper Computer» (`BatteryMonitor V2.1.13`,
 `cnshenergy.com/software-download/`). Внутри — `Agreement/*.xml` (карты протокола,
 `protocolName=BMS-16S`, `protocolVersion=2.0`) и реализация `BatteryMonitor.exe`.
-Подробный разбор — в `PROTOCOL.md`, копия карты — `16S_V20_ADDR_EN.xml`.
+Подробный разбор — в `protocol-BLE.md`, копия карты — `16S_V20_ADDR_EN.xml`.
 
 #### 13.1. Семейство (ответ на «похожие протоколы»)
 
@@ -646,7 +626,7 @@ JBD/JK/Daly; это **собственный формат Enjie**. Его стр
   (разобраны из IL `DataFrame.getLengthCRC` / `getFrameCRC`).
 - Карта телеметрии (CID2=0x42), битовые защиты (0x44), блок параметров
   (0x47 чтение / 0xA1 запись): пороги, защиты, калибровка — см. §4–7
-  в `PROTOCOL.md`.
+  в `protocol-BLE.md`.
 - Список CAN-протоколов инвертора (PN-GDLT, Growatt, Victron, SMA/SOFAR,
   Solis, Studer, MUST).
 
@@ -659,8 +639,8 @@ JBD/JK/Daly; это **собственный формат Enjie**. Его стр
 
 ## 4. Анализ APK EN BMS 1.1.4 (манифест, OSINT, безопасность)
 
-Дата анализа: 2026-09-28. Машина: `sasha-nout`.
-Исходный файл: `/home/sasha/Загрузки/BMS_1.1.4.apk`.
+Дата анализа: 2026-09-28. Машина: `<host>`.
+Исходный файл: `/home/<user>/Загрузки/BMS_1.1.4.apk`.
 
 ### Краткий итог
 
@@ -696,8 +676,8 @@ Energy. Бренд — логотип «N ENERGY» (`assets/.../bmslogo.png`).
 - Подпись: `CN=Android Debug, O=Android, C=US`, серийный номер `1`,
   действительна 2024-03-26 … 2054-03-19, алгоритм **SHA1withRSA** (слабая,
   отладочная).
-  - SHA-1 отпечаток: `6E:B2:E6:3C:6A:9D:89:A0:27:30:39:09:B0:D2:35:38:73:4F:29:9D`
-  - SHA-256 отпечаток: `87:7A:8A:89:DF:B3:9A:CB:CD:10:60:02:AD:84:B6:00:E4:A4:FF:2F:0F:6F:FE:63:EC:AD:EB:C4:D4:FD:3F:AF`
+  - SHA-1 отпечаток: `<ssh-fingerprint>`
+  - SHA-256 отпечаток: `<ssh-fingerprint>`
 
 ### Технологии
 
@@ -939,7 +919,7 @@ keytool -printcert -jarfile BMS_1.1.4.apk
 
 ## Распаковка
 mkdir -p /tmp/kilo/bms && cd /tmp/kilo/bms
-unzip -o /home/sasha/Загрузки/BMS_1.1.4.apk
+unzip -o /home/<user>/Загрузки/BMS_1.1.4.apk
 
 ## AndroidManifest.xml — бинарный AXML, разбирается скриптом /tmp/kilo/axml.py
 
@@ -983,10 +963,10 @@ unrar x -o+ "upper/05-Upper Computer Download/BatteryMonitor V2.1.13_NULL_VER_20
   `teleSignal_Group`, `int_para_Group`, `bit_para_Group`, `adjust_para_Group`,
   `warnHistory`, `canProtocol`.
 - `BatteryMonitor.exe` — .NET (PE32, Mono/.NET) — **реализация**.
-- `Instruction/*.pdf` — инструкция (baud **19200**, логин `admin/admin`).
+- `Instruction/*.pdf` — инструкция (baud **19200**, логин/пароль веб-интерфейса — в `.kilo/`).
 
 **Разбор XML:** `xml.etree.ElementTree`; таблицы полей (телеметрия, защиты,
-параметры) сгенерированы скриптом прямо из XML → см. `PROTOCOL.md`.
+параметры) сгенерированы скриптом прямо из XML → см. `protocol-BLE.md`.
 
 **Разбор `BatteryMonitor.exe` (IL):**
 - `monodis` (`mono-utils`) **падает с segfault** на полном дампе этой сборки;
@@ -1000,16 +980,39 @@ unrar x -o+ "upper/05-Upper Computer Download/BatteryMonitor V2.1.13_NULL_VER_20
 - Токены операндов резолвятся вручную: `token(0xTT00RRRR)` → table `TT`
   (0x04 Field, 0x06 MethodDef, 0x0A MemberRef, 0x70 UserString), `RID`.
 - **Что извлекается:**
-  - `ProtocolCommand..ctor` → коды `CID2` (`PROTOCOL.md` §4);
+  - `ProtocolCommand..ctor` → коды `CID2` (`protocol-BLE.md` §4);
   - `DataFrame.getLengthCRC` → алгоритм `LCHKSUM`;
   - `DataFrame.getFrameCRC` → 16-битная сумма-дополнение;
   - `DataFrame..ctor` → сборка `INFO` (поля big-endian, `ByteNum` байт);
   - `MainWindow.Req*Frame`, `ParaManageDialog.Set*Frame`, `AdjustDialog.*`,
     `SNSettingDialog.*`, `RemoteScheduleDialog.*` → форматы payload
-    чтения/записи (`PROTOCOL.md` §8.4).
+    чтения/записи (`protocol-BLE.md` §8.4).
 
 **Прочие находки:** `canProtocol` Type 1..7 (PN-GDLT, GRWT, VCTR, SMA-SF,
 GINL, STUD, MUST); 485-протокол самоадаптируемый.
+
+### 5.1. IL-факты, добытые для RS485 (2026-10-04)
+
+Дамп методов через `dnfile`+`dncil` (`ildump.py`; поле-таблица `Field=0x04`,
+`Method=0x06` — иначе имена токенов путаются):
+
+- `MainWindow.ReqParamFrame` строит `DataFrame(VER, CID2_GetAllParas=0x47, ADR=packIndex, INFO=[packIndex:1])`.
+- `MainWindow.ReqTelemeterFrame` → `CID2_TeleMeter=0x42`; `ReqTeleStateFrame` → `0x44`.
+- Последовательность опроса в `TreatRcvFrame`: после ответа `ProtocolVer (0x4F)`
+  в очередь ставятся `ReqManufactureFrame (0x51)`, `ReqTeleStateFrame (0x44)`,
+  `ReqTelemeterFrame (0x42)`.
+- `getFrameCRC`: **сумма ASCII-кодов** символов от `VER` до конца `INFO`, затем
+  дополнение до 0 (`((~Σ)&0xFFFF)+1`); `getLengthCRC`: `LCHKSUM<<12|LENID`.
+- `GetReturnMessage`: таблица `RTN`: 0 Normal, 1 ProtocolVer, 2 DataCheck,
+  3 LenCheck, **4 CommandNoSupport**, 5 DataFormat, 6 DataInvalid, 7 Address,
+  8 Flash, 0x80..0xEF User, иначе Undefined.
+- `TreatRcvFrame` TeleState: блок `Ext_Bit` (`NumFieldEnable=True`,
+  `ByteNumAdjust=-1`) читается как `count−1` байт; наблюдён count `0x14` → 19 байт.
+- `TreatRcvFrame` TeleMeter: последний блок `NumFieldEnable=True`, count `0x0A`=10
+  полей × u16; в **EN**-карте 4 поля потеряны, в **CN** `16S_V20_ADDR.xml` они есть:
+  `温漂电流` (×0.001 A), `零点电流` (×0.001 A), `充电能量`/`放电能量` (×0.1 кВт·ч).
+
+Итог и подтверждение на живой RS485 — [`protocol-485.md`](protocol-485.md).
 
 ## 6. Узкие места, грабли и полезные приёмы
 
@@ -1030,7 +1033,7 @@ GINL, STUD, MUST); 485-протокол самоадаптируемый.
   а не по первому `0x0D`. Иначе кадр обрезается и CRC «не сходится».
 - **Устройство `BP00` рекламируется непостоянно** — иначе `Device not available`.
 - **Две контрольные суммы:** приложение — CRC-16/CCITT, ПО Upper Computer —
-  сумма-дополнение (см. `PROTOCOL.md` §3.3, §11).
+  сумма-дополнение (см. `protocol-BLE.md` §3.3, §11).
 - **Адрес ответа** в HCI-дампе — `0x14`, в запросе — `0`.
 - **Поисковики блокируют бота:** рабочие — **Brave** и **GitHub**; DuckDuckGo/
   Google/Yandex/Ecosia/Marginalia/Mojeek отдают капчу/429.
@@ -1051,7 +1054,7 @@ GINL, STUD, MUST); 485-протокол самоадаптируемый.
 | `REVERSE_ENGINEERING.md (раздел 2)` | Реверс кадров из `libapp.so` (формат, CRC, команды). Частично устарел — см. «расхождения». |
 | `REVERSE_ENGINEERING.md (раздел 4)` | Анализ APK 1.1.4, OSINT производителя. |
 | `REVERSE_ENGINEERING.md (раздел 3)` | **Самый полный и актуальный**: реальный протокол (HCI-дамп), декодирование payload, сопоставление с открытыми источниками. |
-| `PROTOCOL.md` | **Первоисточник (производитель)**: протокол из ПО «Upper Computer» (`Agreement/*.xml` + `BatteryMonitor.exe`) — кадр, CID2, телеметрия, блок параметров. |
+| `protocol-BLE.md` | **Первоисточник (производитель)**: протокол из ПО «Upper Computer» (`Agreement/*.xml` + `BatteryMonitor.exe`) — кадр, CID2, телеметрия, блок параметров. |
 | `16S_V20_ADDR_EN.xml` | Копия карты протокола производителя (16S, EN). |
 | `btlogs/` | HCI-snoop дампы с телефона (BTSnoop v1 / H4). В `.gitignore`. |
 | `emu1101-…-v1-0-en.pdf` | Официальный datasheet. |
@@ -1116,16 +1119,16 @@ ACK на запись: `7e1400a100000080e70d`.
    offset→смысл (ток, SOC, ёмкость, флаги защит) трассировкой
    `parseBody_Battery` (0x3f3a18) в `BmsMsgUtil.dart`.
    → **Почти решено**: порядок и масштабы полей телеметрии есть в
-   `PROTOCOL.md` §4 (CID2=0x42), битовые защиты — §6.
+   `protocol-BLE.md` §4 (CID2=0x42), битовые защиты — §6.
 2. **Блок `Bms_PackParamter_Model` (0x47/0xA1, 169 Б)**: разобрать
    `parseBody_PackParams` (0x3e91b8), получить список настроек/порогов.
    → **Решено по составу**: список параметров/порогов (int/bit/adjust) —
-   в `PROTOCOL.md` §7; осталось уточнить байтовые смещения (см. §9).
+   в `protocol-BLE.md` §7; осталось уточнить байтовые смещения (см. §9).
 3. **`addr` в параллельной сборке**: как адресуются модули (DIP/авто-адрес);
    в дампе один пак, addr запроса = 0.
 4. **Обновить `REVERSE_ENGINEERING.md (раздел 2)`** под реальные значения (tail/CRC/роли/0xA1)
    или явно пометить его как частично устаревший.
-5. ~~Установить ПО **Upper Computer**~~ — **сделано** (см. `PROTOCOL.md`):
+5. ~~Установить ПО **Upper Computer**~~ — **сделано** (см. `protocol-BLE.md`):
    ПО и карты протокола получены и разобраны; при желании — снять живой трафик
    RS-485 (baud **19200**) для сверки блока параметров.
 
@@ -1145,7 +1148,7 @@ CRC считать по `frame[1:]`).
 
 #### Живой опрос (если нужно снова)
 - Сервер `192.168.x.x`, root — пароль в связке ключей
-  (`secret-tool lookup service sudo username sasha`).
+  (`secret-tool lookup service sudo username <user>`).
 - ⚠️ **Правило: BT-адаптер сервера НЕ трогать** (никаких рестартов hci/bluez).
 - На сервере есть `bluetoothctl`, `gatttool`, python `bleak` 3.0.2.
 - Пример опроса (write `ff02`, notify `ff01`): `/tmp/kilo/ble_*.py`
@@ -1192,3 +1195,85 @@ CRC считать по `frame[1:]`).
   `ul-gh/pylon_bms_diagnostics`.
 - Pylontech CAN ID: `0x351,0x355,0x356,0x359,0x35C,0x35E`.
 - Seplos/PACE (для сравнения): Modbus-RTU 19200 8N1, блоки PIA/PIB/PIC/SPA/SFA/SCA.
+
+## 9. TCP-мост USR-DR164, BLE-хост gsrv и вывод по RS485 (2026-10-02)
+
+### 9.1. TCP-адаптер USR-DR164 (PUSR / USR IOT)
+
+Использовался для попытки выйти на BMS по RS485 через TCP. Веб-морда:
+`http://192.0.2.75` (`<login>/<password>` — в `.kilo/`, `Server: HTTPD`; на внутренних страницах
+`Microsoft-IIS/5.0`). Меню: System / Work Mode / STA·AP Setting / Serial Setting /
+Net Setting / Account / Upgrade SW / Reboot.
+
+Считанные реквизиты и настройки (2026-10-02):
+
+| Параметр | Значение |
+|---|---|
+| MID | `USR-DR164` |
+| SW | `V1.0.15.000000.0000` |
+| SN | `0220…3240` (замаскирован) |
+| Wi-Fi режим | STA (`GHome-LN-B0`), AP `10.10.100.254` / SSID `USR-DR164_xxxx` |
+| STA IP / MAC | `192.0.2.75` / `xx:xx:xx:xx:xx:xx` |
+| Net | Protocol **TCP**, Mode **SERVER**, Port **8899**, TCP Timeout 300 |
+| Serial | 9600/19200, **8N1**, Pack Interval 20 мс, Pack Size 1400, Com Heart OFF |
+| ModBUS Enabled | **OFF** |
+
+Распиновка клемм (мануал §1.6, `USR-DR164/162 User Manual`):
+
+| Клемма | RS232 | RS485 |
+|---|---|---|
+| 1 | DC 5–36 В + | |
+| 2 | DC 5–36 В − | |
+| 3 | RX | **A** |
+| 4 | TX | **B** |
+| 5 | GND | GND |
+
+Стык с BMS (8P8C RS485, даташит §10.2): **A = пины 2/7**, **B = пины 1/8**,
+**GND = 3/6**. Мануал: `pusr.com/uploads/20241212/c0e4f462ecead06a7e47e13fee88a488.pdf`.
+
+### 9.2. «ModBUS Enabled» — что это
+
+Встроенный Modbus-шлюз адаптера (только для socket A):
+
+- **OFF** — прозрачная передача байт TCP↔RS485 (нужно для протокола Enjie);
+- **Protocol Conversion** — Modbus TCP ↔ Modbus RTU (адаптер разбирает Modbus);
+- **Multi Host Polling** — адаптер сам опрашивает Modbus-слейвы (Poll Timeout /
+  Poll Interval / Abnormal Response относятся к этому режиму).
+
+Для нашего протокола — только **OFF**.
+
+Смена настроек в вебе проходит **двумя шагами**: POST в `do_cmd_en.html` (Save) →
+POST `HF_PROCESS_CMD=RESTART` в `success_en.html` (Reboot); без ребута не применяется.
+Ребут подтверждается кратковременным разрывом (порт на ~2–3 с уходит в `DOWN`).
+
+### 9.3. Линия adapter↔BMS
+
+Рабочая связка: прозрачный IP-RS485-шлюз `192.0.2.77:502` → BMS по диалекту
+**ASCII PACE** (host-RS485 19200 / RM485 9600). Полный разбор, команды и форматы —
+[`protocol-485.md`](protocol-485.md). Для перебора транспортов —
+`tools/tcp_probe.py`; для опроса — `tools/rs485_pace.py`.
+
+### 9.4. BLE-хост gsrv
+
+BLE-опрос делался не с рабочей машины, а через отдельный хост рядом с BMS:
+
+- `user@192.0.2.253` (hostname `gsrv`), Ubuntu 22.04, BLE `hci0`, `bleak`;
+- пароль — в связке ключей: `secret-tool lookup server 192.0.2.253`;
+- BMS: `BP00`, `28:xx:xx:xx:xx:xx`, сервис `0000ff00`, notify `0000ff01`, write `0000ff02`.
+
+### 9.5. Вывод по RS485
+
+Верхний **host-RS485** (п. 10.2, 19200) работает по диалекту **ASCII-hex PACE**
+(`~ VER ADR 46 CID2 LEN INFO CHK CR`, `CHK` = сумма-дополнение ASCII): read-команды
+идут **без INFO** (`LEN=0000`) и доступны телеметрия (`0x42`), состояние/защиты
+(`0x44`), инфо (`0x4F`/`0x51`), **параметры** (`0x47`, 169 Б), время (`0x4D`),
+история (`0x4B`), SN (`0xA4`). На **RM485** (п. 10.1, 9600) доступны только
+`0x42/0x44/0x4F/0x51`. Команда `0x64` (BLE) относится к **инверторному** каналу
+CAN/RM485 и на этой плате даёт `RTN=0xE2` (см. `protocol-BLE.md` §13.3).
+Полное описание — [`protocol-485.md`](protocol-485.md).
+
+### 9.6. «CAN Verify Password»
+
+Локальный пароль приложения (Setting Password) в `shared_preferences`
+(`app_user`/`password`, `SetSpPassword`, страница `MY_SETPASSWORD`); в кадр
+переключения не входит и устройством не проверяется. Не влияет на реверс-опрос.

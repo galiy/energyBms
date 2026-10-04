@@ -1,0 +1,77 @@
+name: release
+
+# Сборка портативных бинарников под Win64 / Linux64 / Mac64 и публикация релиза.
+# Триггер: тег вида v0.1.1. Артефакты прикрепляются к GitHub Release.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux64
+          - os: windows-latest
+            platform: win64
+          - os: macos-13        # Intel (x86_64) для mac64
+            platform: mac64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r energybms-editor/requirements.txt pyinstaller
+
+      - name: Build (PyInstaller, onefile)
+        working-directory: energybms-editor
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name energybms-editor
+          --hidden-import serial --hidden-import serial.tools.list_ports
+          --hidden-import bleak
+          --collect-all bleak
+          run_editor.py
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          set -e
+          VER="${GITHUB_REF_NAME#v}"
+          OUT="energybms-editor/dist"
+          mkdir -p release
+          case "${{ matrix.platform }}" in
+            win64)  SRC="$OUT/energybms-editor.exe" ;;
+            mac64)  SRC="$OUT/energybms-editor.app" ;;
+            *)      SRC="$OUT/energybms-editor" ;;
+          esac
+          if [ -d "$SRC" ]; then
+            # .app (macOS bundle)
+            ( cd "$OUT" && zip -r "../../release/energybms-editor-${VER}-${{ matrix.platform }}.zip" "energybms-editor.app" )
+          else
+            cp "$SRC" "release/energybms-editor-${VER}-${{ matrix.platform }}${{ matrix.platform == 'win64' && '.exe' || '' }}"
+          fi
+          ls -la release
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body_path: energybms-editor/INSTALL.md
+          fail_on_unmatched_files: true

@@ -1,3 +1,6 @@
+# Легаси-таблица для tools/rs485_pace.py (только чтение). Единицы измерения здесь
+# местами некорректны ('When'/'String'); актуальная таблица с русскими названиями
+# и проверенными единицами — energybms-editor/energybms_editor/params.py.
 PARAMS = [
   (0x00,2,'Cell over voltage alarm','0.001','V'),
   (0x01,2,'Cell over voltage alarm recovery','0.001','V'),
