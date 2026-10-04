@@ -4,7 +4,7 @@
 состояния/защит, параметров и редактирование/сохранение параметров через
 RS485 (COM или прозрачный TCP-шлюз) либо BLE.
 
-Платформы: **Windows x64**, **Linux x64**, **macOS x64**.
+Платформы: **Windows x64**, **Linux x64**, **macOS (Apple Silicon, arm64)**.
 Настройки соединения хранятся в `energybms_editor.json` **рядом с запускаемым
 модулем** — приложение и конфиг можно носить на флешке.
 
@@ -18,7 +18,7 @@ RS485 (COM или прозрачный TCP-шлюз) либо BLE.
 |-----------|------|--------|
 | Windows 64 | `energybms-editor-<версия>-win64.exe` | двойной клик (при первом запуске SmartScreen → «Подробнее» → «Выполнить») |
 | Linux 64 | `energybms-editor-<версия>-linux64` | `chmod +x energybms-editor-<версия>-linux64 && ./energybms-editor-<версия>-linux64` |
-| macOS 64 | `energybms-editor-<версия>-mac64.zip` | распаковать, перетащить `energybms-editor.app` в «Программы» |
+| macOS (Apple Silicon, arm64) | `energybms-editor-<версия>-mac-arm64.zip` | распаковать, перетащить `energybms-editor.app` в «Программы» |
 
 Приложение портативно: рядом с бинарником появится `energybms_editor.json` с
 последними настройками. Перенос — просто скопировать бинарник (и, при желании,
@@ -102,6 +102,10 @@ Windows: `py -3 run_editor.py`. Linux/macOS: `python3 run_editor.py`.
 ## 5. Сборка из исходников
 
 ### Локально (текущая ОС)
+PyInstaller — **не кросс-компилятор**: локально собирается только бинарник под
+текущую ОС/архитектуру. С Linux собирается только `linux64`; для `win64` и
+`mac-arm64` нужны соответственно Windows и macOS (используйте CI ниже).
+
 ```sh
 pip install -r requirements.txt pyinstaller
 cd energybms-editor
@@ -114,7 +118,7 @@ pyinstaller --noconfirm --clean --onefile --windowed \
 Результат — в `energybms-editor/dist/`.
 
 ### Все платформы через CI
-Файл `.github/workflows/release.yml` собирает win64/linux64/mac64 на
+Файл `.github/workflows/release.yml` собирает win64/linux64/mac-arm64 на
 GitHub Actions при пуше тега `v*` и публикует релиз:
 ```sh
 git tag v0.1.1
