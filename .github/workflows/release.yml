@@ -21,8 +21,8 @@ jobs:
             platform: linux64
           - os: windows-latest
             platform: win64
-          - os: macos-13        # Intel (x86_64) для mac64
-            platform: mac64
+          - os: macos-14        # Apple Silicon (arm64)
+            platform: mac-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -56,9 +56,9 @@ jobs:
           OUT="energybms-editor/dist"
           mkdir -p release
           case "${{ matrix.platform }}" in
-            win64)  SRC="$OUT/energybms-editor.exe" ;;
-            mac64)  SRC="$OUT/energybms-editor.app" ;;
-            *)      SRC="$OUT/energybms-editor" ;;
+            win64)      SRC="$OUT/energybms-editor.exe" ;;
+            mac-arm64)  SRC="$OUT/energybms-editor.app" ;;
+            *)          SRC="$OUT/energybms-editor" ;;
           esac
           if [ -d "$SRC" ]; then
             # .app (macOS bundle)
