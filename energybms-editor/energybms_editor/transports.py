@@ -81,17 +81,22 @@ class TcpTransport(Transport):
 
     def query(self, frame, timeout=2.0):
         if self._s is None:
-            raise RuntimeError("нет соединения")
+            raise ConnectionError("нет соединения")
         # слить возможный «хвост» от предыдущего ответа (иначе можно разобрать
         # чужой кадр — в PACE CID2 в ответе нет)
         self._s.settimeout(0.05)
         try:
             while True:
-                if not self._s.recv(4096):
+                try:
+                    if not self._s.recv(4096):
+                        raise ConnectionError("соединение закрыто удалённой стороной")
+                except socket.timeout:
                     break
-        except (socket.timeout, BlockingIOError, OSError):
+            self._s.sendall(frame)
+        except socket.timeout:
             pass
-        self._s.sendall(frame)
+        except OSError as exc:
+            raise ConnectionError("соединение потеряно: %s" % exc) from exc
         self._s.settimeout(0.25)
         try:
             deadline = time.time() + timeout
@@ -101,8 +106,10 @@ class TcpTransport(Transport):
                     d = self._s.recv(8192)
                 except socket.timeout:
                     continue
+                except OSError as exc:
+                    raise ConnectionError("соединение потеряно: %s" % exc) from exc
                 if not d:
-                    break
+                    raise ConnectionError("соединение закрыто удалённой стороной")
                 got += d
                 if got.endswith(b"\r"):
                     break

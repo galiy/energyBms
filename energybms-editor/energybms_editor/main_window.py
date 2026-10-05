@@ -21,11 +21,13 @@ from .protocol import CID_RU, rtn_text
 class IoWorker(QThread):
     done = Signal(str, object)
     failed = Signal(str, str)
+    notice = Signal(str)
 
     def __init__(self):
         super().__init__()
         self._q = queue.Queue()
         self.link = None
+        self.cfg = None
 
     def submit(self, op, fn):
         self._q.put((op, fn))
@@ -54,17 +56,51 @@ class IoWorker(QThread):
             self.link.close()
         self.link = BmsLink.create(cfg)
         self.link.connect()
+        self.cfg = cfg
         return cfg
+
+    def _reconnect(self):
+        try:
+            if self.link:
+                self.link.close()
+        except Exception:
+            pass
+        self.link = None
+        self.notice.emit("Соединение потеряно — переподключение…")
+        self.link = BmsLink.create(self.cfg)
+        self.link.connect()
+        self.notice.emit("Соединение восстановлено — повтор операции…")
+
+    def _guarded(self, fn):
+        """Выполняет операцию; при разрыве связи переподключается и повторяет."""
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001 — разрыв связи/ошибка ввода-вывода
+            if not self.cfg:
+                raise
+            self._reconnect()
+            return fn()
 
     def do_read(self):
         if not self.link:
             raise RuntimeError("нет соединения")
-        return self.link.read_all()
+        res = self._guarded(lambda: self.link.read_all())
+        # «полуоткрытое» соединение: сокет жив, но ответов нет — пробуем
+        # переподключиться и повторить чтение один раз
+        if self.cfg and res and not any(r.ok for r in res.values()):
+            try:
+                self._reconnect()
+                res2 = self.link.read_all()
+                if any(r.ok for r in res2.values()):
+                    return res2
+            except Exception:  # noqa: BLE001
+                pass
+        return res
 
     def do_write(self, model):
         if not self.link:
             raise RuntimeError("нет соединения")
-        return self.link.write_params(model)
+        return self._guarded(lambda: self.link.write_params(model))
 
     def do_close(self):
         if self.link:
@@ -75,7 +111,7 @@ class IoWorker(QThread):
     def do_call(self, fn):
         if not self.link:
             raise RuntimeError("нет соединения")
-        return fn(self.link)
+        return self._guarded(lambda: fn(self.link))
 
 
 def _table(headers):
@@ -113,6 +149,7 @@ class MainWindow(QMainWindow):
         self.worker = IoWorker()
         self.worker.done.connect(self._on_done)
         self.worker.failed.connect(self._on_failed)
+        self.worker.notice.connect(self.statusBar().showMessage)
 
         self.conn_label = QLabel()
         self._update_conn_label()
