@@ -82,6 +82,15 @@ class TcpTransport(Transport):
     def query(self, frame, timeout=2.0):
         if self._s is None:
             raise RuntimeError("нет соединения")
+        # слить возможный «хвост» от предыдущего ответа (иначе можно разобрать
+        # чужой кадр — в PACE CID2 в ответе нет)
+        self._s.settimeout(0.05)
+        try:
+            while True:
+                if not self._s.recv(4096):
+                    break
+        except (socket.timeout, BlockingIOError, OSError):
+            pass
         self._s.sendall(frame)
         self._s.settimeout(0.25)
         try:

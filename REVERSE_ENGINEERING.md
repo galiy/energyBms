@@ -1014,6 +1014,26 @@ GINL, STUD, MUST); 485-протокол самоадаптируемый.
 
 Итог и подтверждение на живой RS485 — [`protocol-485.md`](protocol-485.md).
 
+### 5.2. IL-факты по управлению ключами (2026-10-05)
+
+Дамп `BatteryMonitor.exe` (`dnfile`+`dncil`, `ildump.py`):
+
+- `ProtocolCommand..ctor`: `ldc.i4.s 69` → `stfld CID2_TeleCtrlExt` = **`0x45`**.
+- `StudioCtrl.TeleCtrlFrame`: `INFO = [packIndex][bitNo][action]`, где
+  `bitNo = BitIndex·8 + ByteIndex`; `packIndex` = `CurDispPackIndex`;
+  при `CtrlType == "OnOff"`: `StateValue == 0` → `0x10` (ресурс `DataFrame_Open`),
+  иначе → `0x1F` (`DataFrame_Close`); иначе (`Shutdown`/`Reset`) → `0x00`.
+  Этот формат **точно повторён** в редакторе — прошлый `RTN=04` не ошибка кодирования.
+- `loginButton_ItemClick` / `btnlogin_Click`: логин сверяется с
+  `AppSettings['UserName'/'Password']` — это **локальный** админ-режим ПО; в кадр
+  BMS пароль не передаётся. `SendTeleCtrl_CanExecute = LinkOn && Administor`
+  (пароль лишь включает кнопки управления). Отдельной команды-пароля в списке
+  `CID2` нет.
+- Идентификация протокола — OEM-диалект **Seplos / PACE v2.0** (кадр `~20 00 46…`,
+  те же вендорские XML у сторонних репозиториев); см. `protocol-485.md` §4.3.
+- Результат живых попыток `0x45`/`0x9A`/`0x9B` (RS485 VER `20`/`25`, BLE) —
+  `RTN=04`/тишина, ключи не переключаются: `protocol-485.md` §4.2.
+
 ## 6. Узкие места, грабли и полезные приёмы
 
 - **`monodis` segfault** на полной сборке → `dnfile`+`dncil` либо выборочные

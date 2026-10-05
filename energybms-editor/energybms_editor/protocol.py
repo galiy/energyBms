@@ -13,14 +13,16 @@ CID1 = 0x46
 # Логические команды (единый протокол)
 CID = {
     0x42: "TeleMeter", 0x44: "TeleState", 0x4F: "ProtocolVer", 0x51: "Manufacture",
-    0x47: "GetAllParas", 0x4B: "GetHistoryData", 0x4D: "GetTime", 0xA4: "GetBatSN",
+    0x47: "GetAllParas", 0x4B: "GetHistoryData", 0x4D: "GetTime",
+    0xA2: "GetSN", 0xA4: "GetBatSN",
     0x61: "Battery", 0x62: "ParallelBattery",
     0xA1: "SetAllParas", 0x4E: "SetTime", 0x63: "SwitchCAN", 0x45: "TeleCtrl",
 }
 CID_RU = {
     0x42: "Телеметрия", 0x44: "Состояние/защиты", 0x4F: "Версия протокола",
     0x51: "Инфо производителя", 0x47: "Параметры", 0x4B: "История", 0x4D: "Время",
-    0xA4: "Серийный номер батареи", 0x61: "Батарея (BLE)", 0x62: "Параллельные батареи",
+    0xA2: "Серийный номер устройства", 0xA4: "Серийный номер батареи",
+    0x61: "Батарея (BLE)", 0x62: "Параллельные батареи",
 }
 
 RTN = {
@@ -63,7 +65,7 @@ class PaceCodec:
     def capabilities(self):
         if self.is_rm485:
             return [0x42, 0x44, 0x4F, 0x51]
-        return [0x42, 0x44, 0x4F, 0x51, 0x47, 0x4D, 0xA4]
+        return [0x42, 0x44, 0x4F, 0x51, 0x47, 0x4D, 0xA2, 0xA4]
 
     def _build(self, cid2, info, len_in_hex):
         lenid = len(info) * 2 if len_in_hex else len(info)

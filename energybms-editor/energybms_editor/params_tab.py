@@ -1,15 +1,20 @@
-"""Вкладка параметров: блокировка, режим редактирования, валидация, сохранение."""
+"""Вкладки редактирования: числовые параметры и биты-флаги.
+
+Параметры и биты разделены по закладкам, но редактирование общее: кнопки
+«Редактировать/Сохранить/Отменить» живут в главном окне и управляют обеими.
+"""
 import copy
 import math
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+    QDialog, QDialogButtonBox, QHeaderView, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget
 )
 
 from . import params as P
+from .descriptions import BIT_DESC, GROUP_NAMES_RU, PARAM_DESC
 
 DEC_BY_SCALE = {"0.001": 3, "0.01": 2, "0.1": 1, "1": 0}
 INVALID_BG = QColor(255, 205, 205)
@@ -26,7 +31,9 @@ def _fmt(idx, raw):
 
 
 class ParamsTab(QWidget):
-    saveRequested = Signal(dict)
+    """Числовые параметры (0x00..0x56). Режим правки задаётся извне."""
+
+    changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,59 +44,23 @@ class ParamsTab(QWidget):
         self._invalid = set()
         self._missing = set()
 
-        self.status = QLabel("Параметры не прочитаны")
-        self.status.setStyleSheet("color:#555")
-
-        self.btn_edit = QPushButton("Редактировать")
-        self.btn_save = QPushButton("Сохранить")
-        self.btn_cancel = QPushButton("Отменить изменения")
-        self.btn_save.setEnabled(False)
-        self.btn_cancel.setEnabled(False)
-        self.btn_edit.clicked.connect(self._toggle_edit)
-        self.btn_save.clicked.connect(self._save)
-        self.btn_cancel.clicked.connect(self._cancel_edit)
-
-        bar = QHBoxLayout()
-        bar.addWidget(self.btn_edit)
-        bar.addWidget(self.btn_save)
-        bar.addWidget(self.btn_cancel)
-        bar.addStretch(1)
-        bar.addWidget(self.status)
-
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["№", "Параметр", "Значение", "Ед."])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["№", "Параметр", "Значение", "Ед.", "?"])
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        hh = self.table.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.Interactive)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setColumnWidth(0, 56)
+        self.table.setColumnWidth(2, 110)
+        self.table.setColumnWidth(3, 60)
+        self.table.setColumnWidth(4, 30)
         self.table.setSelectionMode(QTableWidget.NoSelection)
         self.table.itemChanged.connect(self._on_item_changed)
 
-        flags_box = QGroupBox("Бит-группы (маски функций и защит)")
-        self.groups = QTableWidget(8, 9)
-        self.groups.setHorizontalHeaderLabels(
-            ["Группа"] + ["%d" % b for b in range(8)])
-        self.groups.verticalHeader().setVisible(False)
-        for g in range(8):
-            item = QTableWidgetItem("group%d" % g)
-            item.setFlags(Qt.ItemIsEnabled)
-            self.groups.setItem(g, 0, item)
-            for b in range(8):
-                cb = QTableWidgetItem()
-                cb.setFlags(Qt.ItemIsEnabled)
-                self.groups.setItem(g, b + 1, cb)
-        self.groups.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.groups.verticalHeader().setDefaultSectionSize(26)
-        self.groups.itemChanged.connect(self._on_item_changed)
-        gv = QVBoxLayout(flags_box)
-        gv.addWidget(self.groups)
-
         lay = QVBoxLayout(self)
-        lay.addLayout(bar)
         lay.addWidget(self.table)
-        lay.addWidget(flags_box)
-
         self._build_rows()
 
-    # ------------------------------------------------------------- построение
     def _build_rows(self):
         self.table.setRowCount(len(P.PARAMS))
         for row, p in enumerate(P.PARAMS):
@@ -108,87 +79,56 @@ class ParamsTab(QWidget):
             self.table.setItem(row, 1, it_name)
             self.table.setItem(row, 2, it_val)
             self.table.setItem(row, 3, it_unit)
-        self.table.resizeColumnToContents(0)
-        self.table.resizeColumnToContents(3)
+            desc = PARAM_DESC.get(idx, "")
+            if desc:
+                from PySide6.QtWidgets import QToolButton
+                btn = QToolButton()
+                btn.setText("?")
+                btn.setAutoRaise(True)
+                btn.setToolTip(desc)
+                btn.clicked.connect(lambda _=False, n=p[3], d=desc: _show_desc(self, n, d))
+                self.table.setCellWidget(row, 4, btn)
 
     def _rows_with_values(self):
         for row in range(self.table.rowCount()):
-            idx = self.table.item(row, 2).data(Qt.UserRole)
-            yield row, idx
+            yield row, self.table.item(row, 2).data(Qt.UserRole)
 
-    # ------------------------------------------------------------- модель
-    def set_model(self, model, keep_original=False):
+    # ------------------------------------------------------------------ модель
+    def set_model(self, model):
         self.model = copy.deepcopy(model)
-        if not keep_original:
-            self.original = copy.deepcopy(model)
+        self.original = copy.deepcopy(model)
         self._loading = True
         raw = self.model.get("raw", {})
         for row, idx in self._rows_with_values():
             text = _fmt(idx, raw.get(idx, 0)) if idx in raw else "–"
             item = self.table.item(row, 2)
             item.setText(text)
-            item.setBackground(QColor("white") if idx in raw else MISSING_BG)
-        self._set_groups(self.model.get("bitgroups", [0] * 8))
+            self._paint(item, "valid" if idx in raw else "missing")
         self._loading = False
         self._invalid = set()
         self._missing = {idx for _, idx in self._rows_with_values() if idx not in raw}
-        self.status.setText("Прочитано параметров: %d%s" %
-                            (len(raw), "" if not self._missing else " (нет данных: %d)" % len(self._missing)))
-        self._apply_edit_state()
 
-    def _set_groups(self, groups):
-        for g in range(8):
-            byte = groups[g] if g < len(groups) else 0
-            for b in range(8):
-                cb = self.groups.item(g, b + 1)
-                cb.setCheckState(Qt.Checked if (byte >> b) & 1 else Qt.Unchecked)
+    @staticmethod
+    def _paint(item, kind):
+        if kind == "valid":
+            item.setBackground(QBrush())
+            item.setForeground(QBrush())
+        elif kind == "missing":
+            item.setBackground(MISSING_BG)
+            item.setForeground(QColor("black"))
+        else:
+            item.setBackground(INVALID_BG)
+            item.setForeground(QColor("black"))
 
-    # ------------------------------------------------------------- редактирование
-    def _toggle_edit(self):
-        if self.model is None:
-            return
-        if self.editing:
-            raw, groups, _inv, _miss = self._collect()
-            if self._changes(raw, groups):
-                ans = QMessageBox.question(
-                    self, "Несохранённые изменения",
-                    "Есть несохранённые изменения. Выйти из режима редактирования "
-                    "без сохранения?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if ans != QMessageBox.Yes:
-                    return
-        self.editing = not self.editing
-        self._apply_edit_state()
-
-    def _cancel_edit(self):
-        self.editing = False
-        self.set_model(self.model, keep_original=True)
-
-    def _apply_edit_state(self):
-        edit = self.editing
-        self.btn_edit.setText("Готово" if edit else "Редактировать")
+    def set_editing(self, editing):
+        self.editing = editing
         for row, _ in self._rows_with_values():
             item = self.table.item(row, 2)
             flags = item.flags()
-            if edit:
-                flags |= Qt.ItemIsEditable
-            else:
-                flags &= ~Qt.ItemIsEditable
-            item.setFlags(flags)
-        for g in range(8):
-            for b in range(8):
-                cb = self.groups.item(g, b + 1)
-                flags = cb.flags()
-                if edit:
-                    flags |= Qt.ItemIsUserCheckable
-                else:
-                    flags &= ~Qt.ItemIsUserCheckable
-                cb.setFlags(flags)
-        self.btn_cancel.setEnabled(edit)
-        self._refresh_save()
+            item.setFlags(flags | Qt.ItemIsEditable if editing else flags & ~Qt.ItemIsEditable)
 
-    def _collect(self):
-        """Собирает текущие raw/bitgroups. Возвращает (raw, groups, invalid, missing)."""
+    # --------------------------------------------------------------- сбор/проверка
+    def collect(self):
         raw = {}
         invalid = set()
         missing = set()
@@ -208,108 +148,183 @@ class ParamsTab(QWidget):
                 raw[idx] = r
             except (ValueError, TypeError, OverflowError):
                 invalid.add(idx)
-        groups = []
-        for g in range(8):
-            byte = 0
-            for b in range(8):
-                if self.groups.item(g, b + 1).checkState() == Qt.Checked:
-                    byte |= (1 << b)
-            groups.append(byte)
-        return raw, groups, invalid, missing
+        return raw, invalid, missing
 
-    def _refresh_save(self):
-        if self.model is None:
-            self.btn_save.setEnabled(False)
-            return
-        raw, groups, invalid, missing = self._collect()
-        changed = self._changes(raw, groups)
-        # Запись идёт всем блоком 169 Б: без данных хоть по одному параметру
-        # записывать нельзя (риск обнулить поле), поэтому missing блокирует.
-        ok = bool(self.editing and changed and not invalid and not missing)
-        self.btn_save.setEnabled(ok)
-        if invalid:
-            tip = "Есть невалидные параметры"
-        elif missing:
-            tip = "Есть параметры без данных — перечитайте перед сохранением"
-        elif not changed:
-            tip = "Нет изменений"
-        else:
-            tip = "Записать изменения в BMS"
-        self.btn_save.setToolTip(tip)
-
-    def _changes(self, raw, groups):
-        orig_raw = self.original.get("raw", {})
-        changed = []
+    def numeric_changes(self, raw):
+        orig = self.original.get("raw", {})
+        out = []
         for idx in sorted(raw):
-            if idx not in orig_raw:
-                # параметр не был прочитан, старое значение неизвестно
-                changed.append(("param", idx, None, raw[idx]))
-            elif raw[idx] != orig_raw.get(idx):
-                changed.append(("param", idx, orig_raw.get(idx), raw[idx]))
-        orig_g = self.original.get("bitgroups", [0] * 8)
-        for g in range(8):
-            if groups[g] != (orig_g[g] if g < len(orig_g) else 0):
-                changed.append(("group", g, orig_g[g] if g < len(orig_g) else 0, groups[g]))
-        return changed
+            if idx not in orig:
+                out.append(("param", idx, None, raw[idx]))
+            elif raw[idx] != orig.get(idx):
+                out.append(("param", idx, orig.get(idx), raw[idx]))
+        return out
+
+    def apply_filter(self, text):
+        q = (text or "").strip().lower()
+        for row, p in enumerate(P.PARAMS):
+            hay = ("0x%02x" % p[0]) + " " + p[2] + " " + p[3] + " " + p[5]
+            self.table.setRowHidden(row, bool(q) and q not in hay.lower())
 
     def _on_item_changed(self, item):
-        if self._loading or not self.editing:
+        if self._loading or not self.editing or item.column() != 2:
             return
-        if item.column() == 2 and item.data(Qt.UserRole) is not None:
-            idx = item.data(Qt.UserRole)
-            text = item.text().strip().replace(",", ".")
-            if text in ("", "–", "-"):
-                item.setBackground(MISSING_BG)
-                self._missing.add(idx)
-                self._invalid.discard(idx)
-            else:
-                try:
-                    val = float(text)
-                    ok = math.isfinite(val)
-                    if ok:
-                        r = P.to_raw(idx, val)
-                        lo, hi = P.raw_range(idx)
-                        ok = lo <= r <= hi
-                except (ValueError, TypeError, OverflowError):
-                    ok = False
-                item.setBackground(QColor("white") if ok else INVALID_BG)
-                if ok:
-                    self._invalid.discard(idx)
-                    self._missing.discard(idx)
-                else:
-                    self._invalid.add(idx)
-        self._refresh_save()
+        idx = item.data(Qt.UserRole)
+        if idx is None:
+            return
+        text = item.text().strip().replace(",", ".")
+        if text in ("", "–", "-"):
+            self._paint(item, "missing")
+            self._missing.add(idx)
+            self._invalid.discard(idx)
+            return
+        try:
+            val = float(text)
+            ok = math.isfinite(val)
+            if ok:
+                r = P.to_raw(idx, val)
+                lo, hi = P.raw_range(idx)
+                ok = lo <= r <= hi
+        except (ValueError, TypeError, OverflowError):
+            ok = False
+        if ok:
+            self._paint(item, "valid")
+            self._invalid.discard(idx)
+            self._missing.discard(idx)
+        else:
+            self._paint(item, "invalid")
+            self._invalid.add(idx)
+        self.changed.emit()
 
-    # ------------------------------------------------------------- сохранение
-    def _save(self):
-        raw, groups, invalid, missing = self._collect()
-        if invalid or missing:
-            if missing:
-                QMessageBox.warning(
-                    self, "Нет данных",
-                    "Часть параметров не прочитана — запись всего блока 169 Б "
-                    "может обнулить эти поля. Перечитайте параметры и повторите.")
-            return
-        changes = self._changes(raw, groups)
-        if not changes:
-            return
-        dlg = ConfirmDialog(changes, self)
-        if dlg.exec() != QDialog.Accepted:
-            return
-        model = copy.deepcopy(self.original)
-        model["raw"].update(raw)
-        model["bitgroups"] = groups
+
+class BitFlagsTab(QWidget):
+    """Биты-флаги (8 групп × 8 бит) вертикальной таблицей, побитно."""
+
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.model = None
+        self.original = None
         self.editing = False
-        self._apply_edit_state()
-        self.saveRequested.emit(model)
+        self._loading = False
+        self._rows = []  # (group, bit)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["Группа", "Бит", "Флаг", "Вкл", "?"])
+        self.table.verticalHeader().setVisible(False)
+        hh = self.table.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.Interactive)
+        hh.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.setColumnWidth(0, 200)
+        self.table.setColumnWidth(1, 40)
+        self.table.setColumnWidth(3, 40)
+        self.table.setColumnWidth(4, 30)
+        self.table.setSelectionMode(QTableWidget.NoSelection)
+        self.table.itemChanged.connect(self._on_item_changed)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(self.table)
+        self._build_rows()
+
+    def _build_rows(self):
+        from PySide6.QtWidgets import QToolButton
+        prev = None
+        for g in range(8):
+            for b in range(8):
+                name = P.BITGROUPS[g][b][1] if b < len(P.BITGROUPS[g]) else ""
+                self._rows.append((g, b))
+                r = len(self._rows) - 1
+                self.table.insertRow(r)
+                grp = GROUP_NAMES_RU.get(g, "group%d" % g) if g != prev else ""
+                prev = g
+                it_g = QTableWidgetItem(grp)
+                it_b = QTableWidgetItem(str(b))
+                it_n = QTableWidgetItem(name)
+                it_c = QTableWidgetItem()
+                for it in (it_g, it_b, it_n, it_c):
+                    it.setFlags(Qt.ItemIsEnabled)
+                it_c.setCheckState(Qt.Unchecked)
+                self.table.setItem(r, 0, it_g)
+                self.table.setItem(r, 1, it_b)
+                self.table.setItem(r, 2, it_n)
+                self.table.setItem(r, 3, it_c)
+                desc = BIT_DESC.get((g, b), "")
+                if desc:
+                    btn = QToolButton()
+                    btn.setText("?")
+                    btn.setAutoRaise(True)
+                    btn.setToolTip(desc)
+                    btn.clicked.connect(lambda _=False, n=name, d=desc: _show_desc(self, n, d))
+                    self.table.setCellWidget(r, 4, btn)
+
+    def set_model(self, model):
+        self.model = copy.deepcopy(model)
+        self.original = copy.deepcopy(model)
+        groups = self.model.get("bitgroups", [0] * 8)
+        self._loading = True
+        for r, (g, b) in enumerate(self._rows):
+            byte = groups[g] if g < len(groups) else 0
+            item = self.table.item(r, 3)
+            item.setCheckState(Qt.Checked if (byte >> b) & 1 else Qt.Unchecked)
+        self._loading = False
+
+    def set_editing(self, editing):
+        self.editing = editing
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 3)
+            flags = item.flags()
+            item.setFlags(flags | Qt.ItemIsUserCheckable if editing
+                          else flags & ~Qt.ItemIsUserCheckable)
+
+    def group_values(self):
+        groups = [0] * 8
+        for r, (g, b) in enumerate(self._rows):
+            if self.table.item(r, 3).checkState() == Qt.Checked:
+                groups[g] |= (1 << b)
+        return groups
+
+    def group_changes(self, groups):
+        orig = self.original.get("bitgroups", [0] * 8)
+        out = []
+        for g in range(8):
+            o = orig[g] if g < len(orig) else 0
+            if groups[g] != o:
+                out.append(("group", g, o, groups[g]))
+        return out
+
+    def apply_filter(self, text):
+        q = (text or "").strip().lower()
+        last_group = None
+        for r, (g, b) in enumerate(self._rows):
+            en, ru = P.BITGROUPS[g][b]
+            hay = (GROUP_NAMES_RU.get(g, "") + " " + en + " " + ru + " " + str(b)).lower()
+            hidden = bool(q) and q not in hay
+            self.table.setRowHidden(r, hidden)
+            if hidden:
+                continue
+            if g != last_group:
+                self.table.item(r, 0).setText(GROUP_NAMES_RU.get(g, "group%d" % g))
+                last_group = g
+            else:
+                self.table.item(r, 0).setText("")
+
+    def _on_item_changed(self, item):
+        if self._loading or not self.editing or item.column() != 3:
+            return
+        self.changed.emit()
+
+
+def _show_desc(parent, name, desc):
+    from PySide6.QtWidgets import QMessageBox
+    QMessageBox.information(parent, name or "Описание", desc)
 
 
 class ConfirmDialog(QDialog):
     def __init__(self, changes, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Подтверждение изменений")
-        rows = len(changes)
-        table = QTableWidget(rows, 3)
+        table = QTableWidget(len(changes), 3)
         table.setHorizontalHeaderLabels(["Параметр", "Было", "Новое"])
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         table.verticalHeader().setVisible(False)
@@ -322,7 +337,7 @@ class ConfirmDialog(QDialog):
                 new_s = _fmt(key, new)
                 unit = p[5]
             else:
-                name = "group%d" % key
+                name = GROUP_NAMES_RU.get(key, "group%d" % key)
                 bitnames = P.BITGROUPS[key] if key < len(P.BITGROUPS) else []
                 diff = old ^ new
                 on = ", ".join(bitnames[b][1] for b in range(8)
@@ -335,10 +350,11 @@ class ConfirmDialog(QDialog):
             table.setItem(i, 0, QTableWidgetItem(name))
             table.setItem(i, 1, QTableWidgetItem("%s %s" % (old_s, unit)))
             item_new = QTableWidgetItem("%s %s" % (new_s, unit))
-            item_new.setForeground(QColor("#0a7d00"))
+            item_new.setForeground(QColor("#1e9e1e"))
             table.setItem(i, 2, item_new)
         table.resizeColumnsToContents()
 
+        from PySide6.QtWidgets import QLabel
         warn = QLabel("<b>Внимание:</b> значения будут записаны в BMS командой 0xA1 "
                       "и сохранены в энергонезависимой памяти устройства.")
         warn.setWordWrap(True)
@@ -353,4 +369,4 @@ class ConfirmDialog(QDialog):
         lay.addWidget(warn)
         lay.addWidget(table)
         lay.addWidget(buttons)
-        self.resize(640, min(120 + rows * 26, 520))
+        self.resize(640, min(120 + len(changes) * 26, 520))

@@ -78,6 +78,8 @@ class ConnectDialog(QDialog):
         self.adr = QSpinBox(); self.adr.setRange(0, 15)
         self.adr.setValue(int(cfg.get("adr", 0)))
 
+
+
         self._pages = [tcp, ser, ble]  # держим ссылки (иначе GC удалит страницы)
         self.stack = QStackedWidget()
         self.stack.addWidget(tcp)

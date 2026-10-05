@@ -20,6 +20,9 @@ energybms_editor.json
 energybms-editor/energybms_editor.json
 *.tmp
 
+# Диагностический дамп чтения BMS (содержит SN устройства/батареи)
+energybms-editor/energybms_last_read.json
+
 # Сборка Python (PyInstaller)
 build/
 dist/

@@ -28,6 +28,25 @@ def config_path():
     return os.path.join(app_dir(), CONFIG_NAME)
 
 
+def dump_last_read(blocks):
+    """Сохраняет сырой результат последнего чтения рядом с конфигом (диагностика)."""
+    data = {}
+    for cid, res in blocks.items():
+        data["0x%02X" % cid] = {"ok": res.ok, "rtn": res.rtn, "info_hex": res.info.hex()}
+    path = os.path.join(app_dir(), "energybms_last_read.json")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return path
+    except OSError:
+        return None
+
+
+def has_saved():
+    """Есть ли сохранённый конфиг (значит, соединение уже настраивали)."""
+    return os.path.exists(config_path())
+
+
 def load():
     cfg = dict(DEFAULTS)
     try:
